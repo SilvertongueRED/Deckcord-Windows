@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { call } from "@decky/api";
-import { SliderField } from "@decky/ui";
+import { call, toaster } from "@decky/api";
+import { DialogButton, SliderField } from "@decky/ui";
 import { useDeckcordState } from "../hooks/useDeckcordState";
 
 export function VoiceChatChannel() {
@@ -9,11 +9,27 @@ export function VoiceChatChannel() {
   // Normal (non-negative) spacing so the channel heading never rides up into
   // the divider rule above it.
   return (
-    <div style={{ width: "100%", padding: "10px 0 4px" }}>
-      <h3 style={{ margin: "0 0 2px 0" }}>{state?.vc?.channel_name}</h3>
-      <h4 style={{ margin: "0 0 4px 0", fontWeight: "normal", opacity: 0.8 }}>
-        {state?.vc?.guild_name}
-      </h4>
+    <div style={{ width: "100%", padding: "10px 0 4px", display: "flex", alignItems: "center", gap: "8px" }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <h3 style={{ margin: "0 0 2px 0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {state?.vc?.channel_name}
+        </h3>
+        <h4 style={{ margin: "0 0 4px 0", fontWeight: "normal", opacity: 0.8 }}>
+          {state?.vc?.guild_name}
+        </h4>
+      </div>
+      <DialogButton
+        style={{ minWidth: 0, width: "96px", height: "40px", padding: "0 12px", flexShrink: 0, backgroundColor: "#d83c3e" }}
+        onClick={() => {
+          call<[], any>("disconnect_vc")
+            .then((ok) => {
+              if (!ok) toaster.toast({ title: "Deckcord", body: "Could not hang up the call", duration: 3000 });
+            })
+            .catch(() => { });
+        }}
+      >
+        Hang up
+      </DialogButton>
     </div>
   );
 }

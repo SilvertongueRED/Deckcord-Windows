@@ -658,6 +658,9 @@ window.Vencord.Plugins.plugins.Deckcord = {
                                     // VOICE_CHANNEL_SELECT(null) only deselects the view and does
                                     // not drop the voice connection on current Discord, so use the
                                     // dedicated voice action creator (same module $dm_call joins with).
+                                    const stillInVc = () => {
+                                        try { return !!Vencord.Webpack.findStore("SelectedChannelStore").getVoiceChannelId(); } catch (e) { return false; }
+                                    };
                                     let done = false;
                                     try {
                                         const voiceMod = Vencord.Webpack.findByProps("selectVoiceChannel");
@@ -668,6 +671,14 @@ window.Vencord.Plugins.plugins.Deckcord = {
                                     } catch (e) { console.error("Deckcord: selectVoiceChannel(null) failed", e); }
                                     if (!done) {
                                         try { FluxDispatcher.dispatch({ type: "VOICE_CHANNEL_SELECT", guildId: null, channelId: null }); done = true; } catch (e) { }
+                                    }
+                                    // DM / group calls can ignore the above. If we are still
+                                    // connected, press Discord's own Disconnect / Leave Call button.
+                                    if (stillInVc()) {
+                                        try {
+                                            const btn = Array.from(document.querySelectorAll('button, [role="button"]')).find((b) => /^(disconnect|leave call|hang up|end call)$/i.test((b.getAttribute("aria-label") || "").trim()));
+                                            if (btn) { btn.click(); done = true; }
+                                        } catch (e) { console.error("Deckcord: disconnect button click failed", e); }
                                     }
                                     result = { ok: done };
                                     break;

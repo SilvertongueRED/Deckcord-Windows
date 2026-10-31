@@ -1,6 +1,6 @@
 {
   "name": "deckcord",
-  "version": "1.0.10",
+  "version": "1.0.11",
   "type": "module",
   "description": "Easy access to discord in game mode, and related functionalities",
   "scripts": {
