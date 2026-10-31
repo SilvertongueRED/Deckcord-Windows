@@ -27,6 +27,9 @@
 ### Deckcord is provided with no gurantee as for its functionality, and I offer no "official" support for it. You can ask in the relevant thread on the [Decky Discord](https://discord.com/invite/U88fbeHyzt) and I will try to help if it's something simple. If it breaks, I will try to fix it, but that's it.
 
 ## Changelog
+### v1.0.12
+- The call section (call name, Hang up button, members) now only shows while you are actually in a call.
+
 ### v1.0.11
 - Added a red **Hang up** button right next to the current call's name in the QAM, so you can always leave a call (including DM and group calls).
 - Disconnect is more reliable for DM/group calls: if Discord ignores the normal leave request, Deckcord now presses Discord's own Disconnect/Leave Call button.

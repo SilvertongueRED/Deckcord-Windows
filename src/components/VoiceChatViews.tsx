@@ -5,7 +5,7 @@ import { useDeckcordState } from "../hooks/useDeckcordState";
 
 export function VoiceChatChannel() {
   const state = useDeckcordState();
-  if (state?.vc == undefined) return (<div></div>);
+  if (!state?.vc?.channel_name) return (<div></div>);
   // Normal (non-negative) spacing so the channel heading never rides up into
   // the divider rule above it.
   return (

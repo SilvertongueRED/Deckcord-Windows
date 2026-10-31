@@ -212,11 +212,15 @@ const Content = () => {
         <PanelSectionRow>
           <MyVolumeControls />
         </PanelSectionRow>
-        <hr></hr>
-        <PanelSectionRow>
-          <VoiceChatChannel />
-          <VoiceChatMembers />
-        </PanelSectionRow>
+        {state?.vc?.channel_name && (
+          <>
+            <hr></hr>
+            <PanelSectionRow>
+              <VoiceChatChannel />
+              <VoiceChatMembers />
+            </PanelSectionRow>
+          </>
+        )}
         <hr></hr>
         <PanelSectionRow>
           <DirectMessageCalls />
