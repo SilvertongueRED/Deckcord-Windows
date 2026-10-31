@@ -26,11 +26,14 @@ import {
 import { MuteButton } from "./components/buttons/MuteButton";
 import { DeafenButton } from "./components/buttons/DeafenButton";
 import { DisconnectButton } from "./components/buttons/DisconnectButton";
+import { GoLiveButton } from "./components/buttons/GoLiveButton";
 import { PushToTalkButton } from "./components/buttons/PushToTalk";
 import {
   VoiceChatChannel,
   VoiceChatMembers,
+  MyVolumeControls,
 } from "./components/VoiceChatViews";
+import { DirectMessageCalls } from "./components/DirectMessageCalls";
 import { UploadScreenshot } from "./components/UploadScreenshot";
 
 declare global {
@@ -171,13 +174,14 @@ const Content = () => {
           <Focusable style={{ display: "flex", justifyContent: "center" }}>
             <MuteButton />
             <DeafenButton />
+            <GoLiveButton />
             <DisconnectButton />
           </Focusable>
         </PanelSectionRow>
         <PanelSectionRow>
           <div
             style={{
-              marginTop: "-8px",
+              marginTop: "8px",
               display: "flex",
               justifyContent: "center",
             }}
@@ -188,7 +192,7 @@ const Content = () => {
         <hr></hr>
         <PanelSectionRow>
           <div style={{ display: "flex", justifyContent: "space-between" }}>
-            <span style={{ marginTop: "-10px" }}>
+            <span style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "4px" }}>
               <img
                 src={
                   "https://cdn.discordapp.com/avatars/" +
@@ -199,14 +203,23 @@ const Content = () => {
                 }
                 width={32}
                 height={32}
+                style={{ borderRadius: "50%", flexShrink: 0 }}
               />
               {state?.me?.username}
             </span>
           </div>
         </PanelSectionRow>
         <PanelSectionRow>
+          <MyVolumeControls />
+        </PanelSectionRow>
+        <hr></hr>
+        <PanelSectionRow>
           <VoiceChatChannel />
           <VoiceChatMembers />
+        </PanelSectionRow>
+        <hr></hr>
+        <PanelSectionRow>
+          <DirectMessageCalls />
         </PanelSectionRow>
         <hr></hr>
         <PanelSectionRow>

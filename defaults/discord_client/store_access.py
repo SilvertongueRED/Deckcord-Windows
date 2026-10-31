@@ -92,8 +92,26 @@ class StoreAccess:
     async def get_last_channels(self):
         return await self._store_access_request("$get_last_channels")
 
-    async def post_screenshot(self, channel_id, data):
-        return await self._store_access_request("$screenshot", channel_id=channel_id, attachment_b64=data)
+    async def get_all_channels(self):
+        return await self._store_access_request("$get_all_channels")
+
+    async def post_screenshot(self, channel_id, data, filename="screenshot.jpg"):
+        return await self._store_access_request("$screenshot", channel_id=channel_id, attachment_b64=data, filename=filename)
 
     async def get_screen_bounds(self):
         return await self._store_access_request("$get_screen_bounds")
+
+    async def get_dms(self):
+        return await self._store_access_request("$get_dms")
+
+    async def dm_call(self, channel_id):
+        return await self._store_access_request("$dm_call", channel_id=channel_id)
+
+    async def get_volumes(self):
+        return await self._store_access_request("$get_volumes")
+
+    async def get_current_vc(self):
+        return await self._store_access_request("$get_current_vc")
+
+    async def screenshare(self):
+        return await self._store_access_request("$screenshare")

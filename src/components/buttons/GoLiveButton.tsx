@@ -1,48 +1,40 @@
 import { DialogButton } from "@decky/ui";
 import { useDeckcordState } from "../../hooks/useDeckcordState";
-import { FaVideo } from "react-icons/fa";
-import { call } from "@decky/api";
+import { FaVideo, FaVideoSlash } from "react-icons/fa";
+import { call, toaster } from "@decky/api";
 
+// Smart screenshare: starts Go Live, watches someone else's stream, or stops.
 export function GoLiveButton() {
   const state = useDeckcordState();
+  const inVc = state?.vc?.channel_name != undefined;
+  const isLive = state?.me?.is_live;
 
-  if (state?.vc == null || state?.vc == undefined)
-    return (<div></div>);
-
-  if (Object.keys(state?.vc).length > 0) {
-    if (!state?.me?.is_live) {
-      return (
-        <DialogButton
-          onClick={() => {
-            call("go_live");
-          }}
-          style={{
-            height: "40px",
-            width: "40px",
-            minWidth: 0,
-            padding: "10px 12px",
-          }}
-        >
-          <FaVideo />
-        </DialogButton>
-      );
-    } else {
-      return (
-        <DialogButton
-          onClick={() => {
-            call("stop_go_live");
-          }}
-          style={{
-            height: "40px",
-            width: "40px",
-            minWidth: 0,
-            padding: "10px 12px",
-            backgroundColor: "red",
-          }}
-        >
-          <FaVideo />
-        </DialogButton>
-      );
-    }
-  } else return <div></div>;
+  return (
+    <DialogButton
+      disabled={!inVc}
+      onClick={() => {
+        call<[], any>("screenshare")
+          .then((r) => {
+            if (!r) return;
+            const bodies: Record<string, string> = {
+              started: "Started screen share",
+              watching: "Watching screen share",
+              stopped: "Stopped screen share",
+              error: r.error || "Screen share failed",
+            };
+            toaster.toast({ title: "Deckcord", body: bodies[r.action] || "Screen share", duration: 3000 });
+          })
+          .catch(() => { });
+      }}
+      style={{
+        height: "40px",
+        width: "40px",
+        minWidth: 0,
+        padding: "10px 12px",
+        marginRight: "10px",
+      }}
+    >
+      {isLive ? <FaVideoSlash /> : <FaVideo />}
+    </DialogButton>
+  );
 }

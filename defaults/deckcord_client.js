@@ -432,17 +432,119 @@ window.Vencord.Plugins.plugins.Deckcord = {
                                         live: MediaEngineStore.getGoLiveSource() != undefined
                                     }
                                     break;
-                                case "$get_last_channels":
-                                    result = {}
+                                case "$get_last_channels": {
                                     const ChannelStore = Vencord.Webpack.Common.ChannelStore;
                                     const GuildStore = Vencord.Webpack.Common.GuildStore;
-                                    const channelIds = Object.values(JSON.parse(Vencord.Util.localStorage.SelectedChannelStore).mostRecentSelectedTextChannelIds);
-                                    for (const chId of channelIds) {
+                                    const UserStore = Vencord.Webpack.Common.UserStore;
+                                    const labelFor = (ch) => {
+                                        if (!ch) return null;
+                                        if (ch.guild_id) {
+                                            const guild = GuildStore.getGuild(ch.guild_id);
+                                            return `${ch.name} (${guild ? guild.name : "Server"})`;
+                                        }
+                                        if (ch.type === 3) {
+                                            if (ch.name) return ch.name;
+                                            try {
+                                                const names = (ch.recipients || []).map(rid => { const u = UserStore.getUser(rid); return u ? (u.globalName || u.username) : null; }).filter(Boolean);
+                                                return names.length ? names.join(", ") : "Group DM";
+                                            } catch (e) { return "Group DM"; }
+                                        }
+                                        const rid = ch.recipients && ch.recipients[0];
+                                        const u = rid ? UserStore.getUser(rid) : null;
+                                        return u ? (u.globalName || u.username) : "Direct Message";
+                                    };
+                                    result = {};
+                                    const seen = new Set();
+                                    const addChannel = (chId) => {
+                                        if (!chId || seen.has(chId)) return;
                                         const ch = ChannelStore.getChannel(chId);
-                                        const guild = GuildStore.getGuild(ch.guild_id);
-                                        result[chId] = `${ch.name} (${guild.name})`;
-                                    }
+                                        const label = labelFor(ch);
+                                        if (!label) return;
+                                        result[chId] = label;
+                                        seen.add(chId);
+                                    };
+                                    // 1. Channels the user personally opened / sent in, newest first
+                                    //    (tracked from CHANNEL_SELECT + own MESSAGE_CREATE, persisted).
+                                    try {
+                                        const recent = (window.DECKCORD_RECENT ? window.DECKCORD_RECENT() : []) || [];
+                                        for (const chId of recent) addChannel(chId);
+                                    } catch (e) { }
+                                    // 2. Fallback so there's always something before any tracked activity:
+                                    //    recent DMs, then per-guild last-selected text channels.
+                                    try {
+                                        const dms = ChannelStore.getSortedPrivateChannels ? ChannelStore.getSortedPrivateChannels() : [];
+                                        dms.slice(0, 10).forEach(ch => { if (ch) addChannel(ch.id); });
+                                    } catch (e) { }
+                                    try {
+                                        const channelIds = Object.values(JSON.parse(Vencord.Util.localStorage.SelectedChannelStore).mostRecentSelectedTextChannelIds);
+                                        for (const chId of channelIds) addChannel(chId);
+                                    } catch (e) { }
                                     break;
+                                }
+                                case "$get_all_channels": {
+                                    const ChannelStore = Vencord.Webpack.Common.ChannelStore;
+                                    const GuildStore = Vencord.Webpack.Common.GuildStore;
+                                    const UserStore = Vencord.Webpack.Common.UserStore;
+                                    const GuildChannelStore = Vencord.Webpack.Common.GuildChannelStore || (Vencord.Webpack.findStore ? Vencord.Webpack.findStore("GuildChannelStore") : null);
+                                    const servers = [];
+                                    let guilds = {};
+                                    try { guilds = GuildStore.getGuilds() || {}; } catch (e) { }
+                                    const guildArr = Object.values(guilds).filter(Boolean);
+                                    guildArr.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+                                    for (const g of guildArr) {
+                                        let chans = [];
+                                        try {
+                                            if (GuildChannelStore && GuildChannelStore.getChannels) {
+                                                const gc = GuildChannelStore.getChannels(g.id);
+                                                if (gc && gc.SELECTABLE) chans = gc.SELECTABLE.map(x => x.channel).filter(Boolean);
+                                            }
+                                        } catch (e) { }
+                                        if (!chans.length) {
+                                            try {
+                                                const mut = ChannelStore.getMutableGuildChannelsForGuild ? ChannelStore.getMutableGuildChannelsForGuild(g.id) : {};
+                                                chans = Object.values(mut).filter(c => c && c.guild_id === g.id);
+                                            } catch (e) { }
+                                        }
+                                        const channels = [];
+                                        for (const ch of chans) {
+                                            if (!ch) continue;
+                                            if (ch.type !== 0 && ch.type !== 5) continue; // text / announcement
+                                            channels.push({ id: ch.id, name: ch.name, position: ch.position || 0 });
+                                        }
+                                        channels.sort((a, b) => a.position - b.position);
+                                        if (channels.length) servers.push({ id: g.id, name: g.name, channels: channels });
+                                    }
+                                    let dmChans = [];
+                                    try { if (ChannelStore.getSortedPrivateChannels) dmChans = ChannelStore.getSortedPrivateChannels(); } catch (e) { }
+                                    if (!dmChans || !dmChans.length) {
+                                        try {
+                                            const mut = ChannelStore.getMutablePrivateChannels ? ChannelStore.getMutablePrivateChannels() : {};
+                                            dmChans = Object.values(mut);
+                                        } catch (e) { }
+                                    }
+                                    const dms = [];
+                                    for (const ch of dmChans) {
+                                        if (!ch) continue;
+                                        if (ch.type !== 1 && ch.type !== 3) continue;
+                                        let name;
+                                        if (ch.type === 3) {
+                                            name = ch.name || "";
+                                            if (!name) {
+                                                try {
+                                                    const names = (ch.recipients || []).map(rid => { const u = UserStore.getUser(rid); return u ? (u.globalName || u.username) : null; }).filter(Boolean);
+                                                    name = names.length ? names.join(", ") : "Group DM";
+                                                } catch (e) { name = "Group DM"; }
+                                            }
+                                        } else {
+                                            const rid = ch.recipients && ch.recipients[0];
+                                            const u = rid ? UserStore.getUser(rid) : null;
+                                            name = u ? (u.globalName || u.username) : "Direct Message";
+                                        }
+                                        dms.push({ id: ch.id, name: name });
+                                    }
+                                    result = { servers: servers, dms: dms };
+                                    break;
+                                }
                                 case "$get_screen_bounds":
                                     result = { width: screen.width, height: screen.height }
                                     break;
@@ -473,7 +575,7 @@ window.Vencord.Plugins.plugins.Deckcord = {
                                     });
                                     return;
                                 case "$screenshot":
-                                    result = await sendAttachmentToChannel(data.channel_id, data.attachment_b64, "screenshot.jpg");
+                                    result = await sendAttachmentToChannel(data.channel_id, data.attachment_b64, data.filename || "screenshot.jpg");
                                     break;
                                 case "$golive":
                                     const vc_channel_id = Vencord.Webpack.findStore("SelectedChannelStore").getVoiceChannelId();
@@ -491,6 +593,102 @@ window.Vencord.Plugins.plugins.Deckcord = {
                                         console.error("Deckcord: Go Live error:", e);
                                     }
                                     return;
+                                case "$screenshare": {
+                                    // Smart screen-share button: watch someone
+                                    // else's stream if one exists in my VC,
+                                    // otherwise stop my own stream if live,
+                                    // otherwise start a Go Live stream.
+                                    try {
+                                        const SelectedChannelStore = Vencord.Webpack.findStore("SelectedChannelStore");
+                                        const vcId = SelectedChannelStore.getVoiceChannelId();
+                                        if (!vcId) { result = { action: "error", error: "Not in a voice channel" }; break; }
+                                        const channel = Vencord.Webpack.Common.ChannelStore.getChannel(vcId);
+                                        const guildId = channel ? channel.guild_id : null;
+                                        const myId = Vencord.Webpack.Common.UserStore.getCurrentUser().id;
+
+                                        const streamMod = Vencord.Webpack.findByProps("startStream", "stopStream");
+                                        const watchMod = Vencord.Webpack.findByProps("watchStream", "stopWatchingStream");
+                                        const StreamStore = Vencord.Webpack.findStore("ApplicationStreamingStore");
+
+                                        // Am I already streaming?
+                                        let amStreaming = false;
+                                        try { amStreaming = !!(StreamStore && StreamStore.getCurrentUserActiveStream && StreamStore.getCurrentUserActiveStream()); } catch (e) { }
+                                        if (!amStreaming) {
+                                            try { amStreaming = !!(MediaEngineStore.getGoLiveSource && MediaEngineStore.getGoLiveSource()); } catch (e) { }
+                                        }
+
+                                        // Streams from other people in this channel
+                                        let channelStreams = [];
+                                        try {
+                                            if (StreamStore && StreamStore.getAllApplicationStreamsForChannel)
+                                                channelStreams = StreamStore.getAllApplicationStreamsForChannel(vcId) || [];
+                                        } catch (e) { }
+                                        const otherStreams = channelStreams.filter(s => (s.ownerId || s.userId) && (s.ownerId || s.userId) !== myId);
+
+                                        if (amStreaming) {
+                                            if (streamMod && streamMod.stopStream) streamMod.stopStream(null, null, null);
+                                            result = { action: "stopped" };
+                                        } else if (otherStreams.length > 0) {
+                                            const s = otherStreams[0];
+                                            let key = s.streamKey;
+                                            try {
+                                                const keyMod = Vencord.Webpack.findByProps("encodeStreamKey");
+                                                if (keyMod && keyMod.encodeStreamKey) key = keyMod.encodeStreamKey(s);
+                                            } catch (e) { }
+                                            if (!key) {
+                                                const type = s.streamType || (guildId ? "guild" : "call");
+                                                key = guildId ? `${type}:${guildId}:${vcId}:${s.ownerId || s.userId}` : `${type}:${vcId}:${s.ownerId || s.userId}`;
+                                            }
+                                            const wm = (watchMod && watchMod.watchStream) ? watchMod : streamMod;
+                                            if (wm && wm.watchStream) wm.watchStream(key);
+                                            else { result = { action: "error", error: "Could not find watchStream" }; break; }
+                                            result = { action: "watching", owner: s.ownerId || s.userId };
+                                        } else {
+                                            if (streamMod && streamMod.startStream) streamMod.startStream(guildId, vcId, "Activity Panel");
+                                            else { result = { action: "error", error: "Could not find startStream" }; break; }
+                                            result = { action: "started" };
+                                        }
+                                    } catch (e) {
+                                        result = { action: "error", error: String(e) };
+                                    }
+                                    break;
+                                }
+                                case "$disconnect": {
+                                    // Actually leave the voice channel. Dispatching a raw
+                                    // VOICE_CHANNEL_SELECT(null) only deselects the view and does
+                                    // not drop the voice connection on current Discord, so use the
+                                    // dedicated voice action creator (same module $dm_call joins with).
+                                    let done = false;
+                                    try {
+                                        const voiceMod = Vencord.Webpack.findByProps("selectVoiceChannel");
+                                        if (voiceMod && typeof voiceMod.selectVoiceChannel === "function") {
+                                            voiceMod.selectVoiceChannel(null);
+                                            done = true;
+                                        }
+                                    } catch (e) { console.error("Deckcord: selectVoiceChannel(null) failed", e); }
+                                    if (!done) {
+                                        try { FluxDispatcher.dispatch({ type: "VOICE_CHANNEL_SELECT", guildId: null, channelId: null }); done = true; } catch (e) { }
+                                    }
+                                    result = { ok: done };
+                                    break;
+                                }
+                                case "$toggle_self_mute": {
+                                    // The mic mute button: prefer Discord's dedicated action creator
+                                    // (what the real mute button calls) so it behaves like deafen.
+                                    // Dispatching the raw AUDIO_TOGGLE_SELF_MUTE action is unreliable.
+                                    let done = false;
+                                    try {
+                                        const m = Vencord.Webpack.findByProps("toggleSelfMute");
+                                        if (m && typeof m.toggleSelfMute === "function") {
+                                            m.toggleSelfMute();
+                                            done = true;
+                                        }
+                                    } catch (e) { console.error("Deckcord: toggleSelfMute failed", e); }
+                                    if (!done) {
+                                        try { FluxDispatcher.dispatch({ type: "AUDIO_TOGGLE_SELF_MUTE", context: "default", syncRemote: true }); } catch (e) { }
+                                    }
+                                    return;
+                                }
                                 case "$webrtc":
                                     return;
                                 case "$file_picker_list":
@@ -518,6 +716,151 @@ window.Vencord.Plugins.plugins.Deckcord = {
                                         }
                                     }
                                     window._pendingFileInput = null;
+                                    return;
+                                case "$get_dms": {
+                                    const ChannelStore = Vencord.Webpack.Common.ChannelStore;
+                                    const UserStore = Vencord.Webpack.Common.UserStore;
+                                    let chans = [];
+                                    try {
+                                        if (ChannelStore.getSortedPrivateChannels)
+                                            chans = ChannelStore.getSortedPrivateChannels();
+                                    } catch (e) { }
+                                    if (!chans || !chans.length) {
+                                        try {
+                                            const mut = ChannelStore.getMutablePrivateChannels ? ChannelStore.getMutablePrivateChannels() : {};
+                                            chans = Object.values(mut);
+                                        } catch (e) { }
+                                    }
+                                    const dms = [];
+                                    for (const ch of chans) {
+                                        if (!ch) continue;
+                                        if (ch.type !== 1 && ch.type !== 3) continue; // 1 = DM, 3 = group DM
+                                        const isGroup = ch.type === 3;
+                                        let name, icon;
+                                        if (isGroup) {
+                                            name = ch.name || "";
+                                            if (!name) {
+                                                try {
+                                                    const names = (ch.recipients || []).map(rid => { const u = UserStore.getUser(rid); return u ? (u.globalName || u.username) : null; }).filter(Boolean);
+                                                    name = names.length ? names.join(", ") : "Group DM";
+                                                } catch (e) { name = "Group DM"; }
+                                            }
+                                            icon = ch.icon ? ("https://cdn.discordapp.com/channel-icons/" + ch.id + "/" + ch.icon + ".webp?size=64") : "https://cdn.discordapp.com/embed/avatars/0.png";
+                                        } else {
+                                            const rid = ch.recipients && ch.recipients[0];
+                                            const u = rid ? UserStore.getUser(rid) : null;
+                                            name = u ? (u.globalName || u.username) : "Direct Message";
+                                            icon = (u && u.avatar) ? ("https://cdn.discordapp.com/avatars/" + rid + "/" + u.avatar + ".webp?size=64") : "https://cdn.discordapp.com/embed/avatars/0.png";
+                                        }
+                                        dms.push({ id: ch.id, name: name, icon: icon, isGroup: isGroup });
+                                    }
+                                    result = dms.slice(0, 15);
+                                    break;
+                                }
+                                case "$dm_call": {
+                                    const channelId = data.channel_id;
+                                    try {
+                                        const voiceMod = Vencord.Webpack.findByProps("selectVoiceChannel");
+                                        const callMod = Vencord.Webpack.findByProps("call", "ring") || Vencord.Webpack.findByProps("ring");
+                                        let CallStore = null;
+                                        try { CallStore = Vencord.Webpack.findStore("CallStore"); } catch (e) { }
+                                        const active = !!(CallStore && CallStore.getCall && CallStore.getCall(channelId));
+                                        if (active) {
+                                            // A call is already happening here — join its voice.
+                                            if (voiceMod && voiceMod.selectVoiceChannel) voiceMod.selectVoiceChannel(channelId);
+                                            else if (callMod && callMod.call) callMod.call(channelId);
+                                        } else {
+                                            // No active call — start one (and ring recipients).
+                                            if (callMod && callMod.call) callMod.call(channelId);
+                                            else if (voiceMod && voiceMod.selectVoiceChannel) voiceMod.selectVoiceChannel(channelId);
+                                        }
+                                        result = { ok: true, joined: active, used: { call: !!(callMod && callMod.call), voice: !!(voiceMod && voiceMod.selectVoiceChannel) } };
+                                    } catch (e) {
+                                        result = { error: String(e) };
+                                    }
+                                    break;
+                                }
+                                case "$get_current_vc": {
+                                    // Read the live voice channel + members straight from the
+                                    // stores so the QAM panel shows the active call even when
+                                    // FluxDispatcher interceptor events don't reach the backend.
+                                    try {
+                                        const ChannelStore = Vencord.Webpack.Common.ChannelStore;
+                                        const GuildStore = Vencord.Webpack.Common.GuildStore;
+                                        const UserStore = Vencord.Webpack.Common.UserStore;
+                                        const SelectedChannelStore = Vencord.Webpack.findStore("SelectedChannelStore");
+                                        const vcId = SelectedChannelStore.getVoiceChannelId();
+                                        if (!vcId) { result = { channel_id: null }; break; }
+                                        const channel = ChannelStore.getChannel(vcId);
+                                        const guild = (channel && channel.guild_id) ? GuildStore.getGuild(channel.guild_id) : null;
+                                        let chName = channel ? channel.name : "";
+                                        if (channel && !chName) {
+                                            if (channel.type === 1) {
+                                                const rid = channel.recipients && channel.recipients[0];
+                                                const ru = rid ? UserStore.getUser(rid) : null;
+                                                chName = ru ? (ru.globalName || ru.username) : "Direct Message";
+                                            } else if (channel.type === 3) {
+                                                chName = channel.name || "Group Call";
+                                            }
+                                        }
+                                        const VoiceStateStore = Vencord.Webpack.findStore("VoiceStateStore");
+                                        const states = (VoiceStateStore && VoiceStateStore.getVoiceStatesForChannel) ? (VoiceStateStore.getVoiceStatesForChannel(vcId) || {}) : {};
+                                        const users = [];
+                                        for (const uid of Object.keys(states)) {
+                                            const st = states[uid] || {};
+                                            const u = UserStore.getUser(uid);
+                                            users.push({
+                                                id: uid,
+                                                username: u ? (u.globalName || u.username || "") : "",
+                                                avatar: u ? (u.avatar || "") : "",
+                                                is_muted: !!(st.mute || st.selfMute),
+                                                is_deafened: !!(st.deaf || st.selfDeaf),
+                                                is_live: !!st.selfStream
+                                            });
+                                        }
+                                        result = { channel_id: vcId, channel_name: chName, guild_name: guild ? guild.name : "", users: users };
+                                    } catch (e) {
+                                        result = { channel_id: null, error: String(e) };
+                                    }
+                                    break;
+                                }
+                                case "$get_volumes": {
+                                    const users = {};
+                                    try {
+                                        const vcId = Vencord.Webpack.findStore("SelectedChannelStore").getVoiceChannelId();
+                                        if (vcId) {
+                                            const VoiceStateStore = Vencord.Webpack.findStore("VoiceStateStore");
+                                            const states = VoiceStateStore.getVoiceStatesForChannel(vcId) || {};
+                                            for (const uid of Object.keys(states)) {
+                                                try { users[uid] = MediaEngineStore.getLocalVolume(uid); } catch (e) { }
+                                            }
+                                        }
+                                    } catch (e) { }
+                                    let inputVol = 100, outputVol = 100;
+                                    try { inputVol = MediaEngineStore.getInputVolume(); } catch (e) { }
+                                    try { outputVol = MediaEngineStore.getOutputVolume(); } catch (e) { }
+                                    result = { input: inputVol, output: outputVol, users: users };
+                                    break;
+                                }
+                                case "$set_local_volume":
+                                    try {
+                                        const volMod = Vencord.Webpack.findByProps("setLocalVolume");
+                                        if (volMod && volMod.setLocalVolume) volMod.setLocalVolume(data.user_id, data.volume, "default");
+                                    } catch (e) { console.error("Deckcord: setLocalVolume failed", e); }
+                                    return;
+                                case "$set_input_volume":
+                                    try {
+                                        const inMod = Vencord.Webpack.findByProps("setInputVolume");
+                                        if (inMod && inMod.setInputVolume) inMod.setInputVolume(data.volume);
+                                        else MediaEngineStore.getMediaEngine().setInputVolume(data.volume);
+                                    } catch (e) { console.error("Deckcord: setInputVolume failed", e); }
+                                    return;
+                                case "$set_output_volume":
+                                    try {
+                                        const outMod = Vencord.Webpack.findByProps("setOutputVolume");
+                                        if (outMod && outMod.setOutputVolume) outMod.setOutputVolume(data.volume);
+                                        else MediaEngineStore.getMediaEngine().setOutputVolume(data.volume);
+                                    } catch (e) { console.error("Deckcord: setOutputVolume failed", e); }
                                     return;
                             }
                         } catch (error) {
@@ -592,6 +935,37 @@ window.Vencord.Plugins.plugins.Deckcord = {
                     }
                 });
                 console.log("Deckcord: Added event interceptor");
+            }
+            // Track the channels the user personally opens / sends in (newest
+            // first, persisted in the Discord tab) so the QAM uploader can
+            // default to the last one they actually used.
+            if (!window.__DECKCORD_RECENT_TRACKING) {
+                window.__DECKCORD_RECENT_TRACKING = true;
+                const DC_RECENT_KEY = "deckcord_recent_channels";
+                const dcLoad = () => { try { return JSON.parse(localStorage.getItem(DC_RECENT_KEY) || "[]"); } catch (e) { return []; } };
+                const dcSave = (list) => { try { localStorage.setItem(DC_RECENT_KEY, JSON.stringify(list.slice(0, 30))); } catch (e) { } };
+                const dcTouch = (chId) => {
+                    if (!chId) return;
+                    const list = dcLoad().filter(id => id !== chId);
+                    list.unshift(chId);
+                    dcSave(list);
+                };
+                window.DECKCORD_RECENT = dcLoad;
+                const dcStart = Date.now();
+                try {
+                    FluxDispatcher.subscribe("CHANNEL_SELECT", (e) => {
+                        // Skip the channel Discord auto-lands on at boot — not a user action.
+                        if (Date.now() - dcStart < 5000) return;
+                        if (e && e.channelId) dcTouch(e.channelId);
+                    });
+                    FluxDispatcher.subscribe("MESSAGE_CREATE", (e) => {
+                        try {
+                            const me = Vencord.Webpack.Common.UserStore.getCurrentUser();
+                            if (me && e && e.message && e.message.author && e.message.author.id === me.id && e.channelId) dcTouch(e.channelId);
+                        } catch (err) { }
+                    });
+                    console.log("Deckcord: Added recent-channel tracking");
+                } catch (e) { console.error("Deckcord: recent-channel tracking setup failed", e); }
             }
             connect();
         });

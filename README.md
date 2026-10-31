@@ -8,20 +8,29 @@
 ## Features
 - Runs web discord as a separate tab in the background.
 - Open/Close easily while in-game from the main menu.
-- Mute/Deafen/Disconnect and check members in your channel from the QAM.
-- One-button post steam screenshots to your recent channels.
+- Mute/Deafen/Go Live/Disconnect and check members in your channel from the QAM.
+- Headset, mic and per-user volume sliders in the QAM.
+- Start calls with your recent DMs straight from the QAM.
+- One-button post Steam screenshots and video clips to your recent channels, or browse every server/DM.
 - Show your current game as playing status.
 - Get notifications for DMs and pings in-game.
 - Push-to-talk support, with physical keybind to rear buttons. (R5 Button)
 - [Vencord](https://vencord.dev/) gets injected automatically before discord is loaded. It's needed to access a lot of the functionality that allows the plugin to do cool stuff, but also gives ya access to tons of other cool stuff.
 - Working screenshare with audio
+- Windows (Steam Big Picture) support: fullscreen Discord view, Windows-safe startup and Vencord download.
 
 ## How to install  
 1. Enable *Developer Mode* in Decky General settings.
-2. Download the lateste release from https://github.com/andriuspetravicius/Deckcord/releases 
+2. Download the lateste release from https://github.com/SilvertongueRED/Deckcord-Windows/releases 
 3. Go to Developer in Decky settings and upload the downloaded Deckord zip file
 
 ### Deckcord is provided with no gurantee as for its functionality, and I offer no "official" support for it. You can ask in the relevant thread on the [Decky Discord](https://discord.com/invite/U88fbeHyzt) and I will try to help if it's something simple. If it breaks, I will try to fix it, but that's it.
+
+## Changelog
+### v1.0.10
+- Fixed the "Group Call" (voice channel) heading overlapping the divider under Mic Volume in the QAM.
+- The Discord item in the left Steam menu now always shows the Discord logo, even when the fallback item is used (it used to show the Store tag icon and look squished).
+- Repo source synced with the live Windows plugin: volume sliders, DM call list, smart screenshare button, media/clip uploader with browse-all picker, fullscreen view fix, menu fallback gating.
 
 ## Credits
 - Huge thanks to [@marios8543](https://github.com/marios8543) for creating this Decky plugin

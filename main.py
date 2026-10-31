@@ -59,6 +59,20 @@ async def initialize():
     await setup_discord_tab(tab)
     await boot_discord(tab)
 
+    # Tell CEF to treat the Discord page as focused even when Steam's UI has
+    # input focus, so the compositor keeps producing frames (otherwise the view
+    # paints once then freezes on the loading gradient on Windows).
+    try:
+        await tab._send_devtools_cmd(
+            {
+                "method": "Emulation.setFocusEmulationEnabled",
+                "params": {"enabled": True},
+            },
+            receive=False,
+        )
+    except Exception as e:
+        logger.warning(f"setFocusEmulationEnabled failed: {e}")
+
     create_task(watchdog(tab))
 
 
@@ -126,25 +140,34 @@ class Plugin:
         await cls.shared_js_tab.open_websocket()
         create_task(cls._notification_dispatcher())
 
-        cls.webrtc_server = await create_subprocess_exec(
-            "/usr/bin/python",
-            str(Path(DECKY_PLUGIN_DIR) / "gst_webrtc.py"),
-            env={
-                "LD_LIBRARY_PATH": str(Path(DECKY_PLUGIN_DIR) / "bin"),
-                "GI_TYPELIB_PATH": str(Path(DECKY_PLUGIN_DIR) / "bin/girepository-1.0"),
-                "GST_PLUGIN_PATH": str(Path(DECKY_PLUGIN_DIR) / "bin/gstreamer-1.0"),
-                "GST_VAAPI_ALL_DRIVERS": "1",
-                "OPENSSL_CONF": "/etc/ssl/openssl.cnf",
-                "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus",
-                "XDG_RUNTIME_DIR": "/run/user/1000",
-                "XDG_DATA_DIRS": "/home/deck/.local/share/flatpak/exports/share:/var/lib/flatpak/exports/share:/usr/local/share:/usr/share",
-                "LIBVA_DRIVER_NAME": "radeonsi",
-            },
-            stdout=PIPE,
-            stderr=PIPE,
-        )
-        create_task(stream_watcher(cls.webrtc_server.stdout))
-        create_task(stream_watcher(cls.webrtc_server.stderr, True))
+        # The GStreamer WebRTC helper is Linux/Steam Deck only — it relies on
+        # /usr/bin/python and a set of Linux library paths. On Windows (and any
+        # other non-Linux host) launching it raises FileNotFoundError, which
+        # would crash backend startup and leave the plugin stuck initializing.
+        if sys.platform.startswith("linux"):
+            cls.webrtc_server = await create_subprocess_exec(
+                "/usr/bin/python",
+                str(Path(DECKY_PLUGIN_DIR) / "gst_webrtc.py"),
+                env={
+                    "LD_LIBRARY_PATH": str(Path(DECKY_PLUGIN_DIR) / "bin"),
+                    "GI_TYPELIB_PATH": str(Path(DECKY_PLUGIN_DIR) / "bin/girepository-1.0"),
+                    "GST_PLUGIN_PATH": str(Path(DECKY_PLUGIN_DIR) / "bin/gstreamer-1.0"),
+                    "GST_VAAPI_ALL_DRIVERS": "1",
+                    "OPENSSL_CONF": "/etc/ssl/openssl.cnf",
+                    "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus",
+                    "XDG_RUNTIME_DIR": "/run/user/1000",
+                    "XDG_DATA_DIRS": "/home/deck/.local/share/flatpak/exports/share:/var/lib/flatpak/exports/share:/usr/local/share:/usr/share",
+                    "LIBVA_DRIVER_NAME": "radeonsi",
+                },
+                stdout=PIPE,
+                stderr=PIPE,
+            )
+            create_task(stream_watcher(cls.webrtc_server.stdout))
+            create_task(stream_watcher(cls.webrtc_server.stderr, True))
+        else:
+            logger.info(
+                f"Skipping GStreamer WebRTC helper on non-Linux platform ({sys.platform})"
+            )
 
         # Yield state updates to frontend
         async for state in cls.evt_handler.yield_new_state():
@@ -234,6 +257,32 @@ class Plugin:
         return await cls.evt_handler.disconnect_vc()
 
     @classmethod
+    async def get_volumes(cls):
+        """Return {input, output, users: {user_id: volume}} from the Discord tab."""
+        return await cls.evt_handler.api.get_volumes() or {
+            "input": 100,
+            "output": 100,
+            "users": {},
+        }
+
+    @classmethod
+    async def set_user_volume(cls, user_id, volume):
+        logger.info(f"Setting local volume for {user_id} to {volume}")
+        await cls.evt_handler.send_json(
+            {"type": "$set_local_volume", "user_id": user_id, "volume": volume}
+        )
+
+    @classmethod
+    async def set_input_volume(cls, volume):
+        logger.info(f"Setting mic (input) volume to {volume}")
+        await cls.evt_handler.send_json({"type": "$set_input_volume", "volume": volume})
+
+    @classmethod
+    async def set_output_volume(cls, volume):
+        logger.info(f"Setting headset (output) volume to {volume}")
+        await cls.evt_handler.send_json({"type": "$set_output_volume", "volume": volume})
+
+    @classmethod
     async def set_ptt(cls, value):
         await cls.evt_handler.send_json({"type": "$ptt", "value": value})
 
@@ -251,9 +300,76 @@ class Plugin:
         return await cls.evt_handler.api.get_last_channels() or []
 
     @classmethod
-    async def post_screenshot(cls, channel_id, data):
+    async def get_all_channels(cls):
+        """Full list of servers (with their text channels) and DMs for the
+        QAM 'Browse all' picker."""
+        return await cls.evt_handler.api.get_all_channels() or {"servers": [], "dms": []}
+
+    @classmethod
+    async def get_clips(cls):
+        """Scan known Steam recording folders for exported video clips.
+        Returns [{id, name, path, mtime}], newest first. Safe to return []."""
+        import glob
+
+        roots = []
+        # Windows Steam install locations.
+        for env in ("ProgramFiles(x86)", "ProgramFiles", "ProgramW6432"):
+            base = os.environ.get(env)
+            if base:
+                roots.append(os.path.join(base, "Steam"))
+        # Common Linux / Steam Deck locations.
+        home = os.path.expanduser("~")
+        roots += [
+            os.path.join(home, ".steam", "steam"),
+            os.path.join(home, ".local", "share", "Steam"),
+            "/home/deck/.local/share/Steam",
+        ]
+
+        seen = set()
+        clips = []
+        exts = (".mp4", ".mov", ".webm", ".mkv")
+        for root in roots:
+            userdata = os.path.join(root, "userdata")
+            if not os.path.isdir(userdata):
+                continue
+            for path in glob.glob(
+                os.path.join(userdata, "*", "gamerecordings", "**", "*"),
+                recursive=True,
+            ):
+                try:
+                    if not path.lower().endswith(exts) or not os.path.isfile(path):
+                        continue
+                    rp = os.path.realpath(path)
+                    if rp in seen:
+                        continue
+                    seen.add(rp)
+                    st = os.stat(path)
+                    clips.append(
+                        {
+                            "id": rp,
+                            "name": os.path.basename(path),
+                            "path": rp,
+                            "mtime": int(st.st_mtime),
+                        }
+                    )
+                except OSError:
+                    continue
+        clips.sort(key=lambda c: c["mtime"], reverse=True)
+        return clips[:50]
+
+    @classmethod
+    async def get_dms(cls):
+        return await cls.evt_handler.api.get_dms() or []
+
+    @classmethod
+    async def dm_call(cls, channel_id):
+        logger.info("DM call requested for " + str(channel_id))
+        return await cls.evt_handler.api.dm_call(channel_id)
+
+    @classmethod
+    async def post_screenshot(cls, channel_id, data, filename="screenshot.jpg"):
         logger.info("Posting screenshot to " + channel_id)
-        r = await cls.evt_handler.api.post_screenshot(channel_id, data)
+        r = await cls.evt_handler.api.post_screenshot(channel_id, data, filename)
 
         if r:
             return True
@@ -264,8 +380,38 @@ class Plugin:
         )
 
     @classmethod
+    async def post_local_file(cls, channel_id, path, filename=None):
+        """Read a local file (e.g. a video clip) and upload it to a channel."""
+        from base64 import b64encode
+
+        logger.info("Posting local file to " + str(channel_id) + ": " + str(path))
+        try:
+            with open(path, "rb") as f:
+                data = b64encode(f.read()).decode("ascii")
+        except OSError as e:
+            logger.error("Could not read local file: " + str(e))
+            data = None
+
+        if data is not None:
+            fn = filename or os.path.basename(path)
+            r = await cls.evt_handler.api.post_screenshot(channel_id, data, fn)
+            if r:
+                return True
+
+        payload = dumps({"title": "Deckcord", "body": "Error while posting file"})
+        await cls._evaluate_shared_js(
+            f"window.DECKCORD.dispatchNotification({payload});"
+        )
+
+    @classmethod
     async def get_screen_bounds(cls):
         return await cls.evt_handler.api.get_screen_bounds() or {"width": 1280, "height": 800}
+
+    @classmethod
+    async def screenshare(cls):
+        # Smart screen-share: watch an existing stream in my VC, stop my own,
+        # or start a Go Live. Returns the action taken so the UI can toast it.
+        return await cls.evt_handler.api.screenshare()
 
     @classmethod
     async def go_live(cls):

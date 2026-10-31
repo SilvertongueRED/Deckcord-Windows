@@ -57,11 +57,39 @@ export const DiscordTab = () => {
             if (state?.loaded && window.DISCORD_TAB) {
                 const bv = window.DISCORD_TAB.m_browserView;
                 bv.SetVisible(true);
-                // Place Discord BrowserView below Steam UI so status bar and
-                // side menus render on top.
-                try { bv.SetWindowStackingOrder?.(0); } catch (_e) { }
+                // Keep the Discord BrowserView on top. On Windows, bottom-
+                // stacking it (SetWindowStackingOrder(0)) puts it beneath
+                // Steam's opaque main-UI layer, which composites as a solid
+                // black screen. SetFocus brings it to the front instead.
                 bv.SetFocus(true);
                 try { bv.NotifyUserActivation?.(); } catch (_e) { }
+
+                // On Windows this build leaves the BrowserView far smaller than
+                // the Steam window (window size / devicePixelRatio), so Discord
+                // renders into a small top-left box. Resize the view to fill the
+                // actual main window, and re-apply a few times while Discord
+                // settles (and after any keyboard-driven resize).
+                const __dcMW = () => (Router as any).WindowStore?.GamepadUIMainWindowInstance?.m_BrowserWindow;
+                const __dcFill = () => {
+                    try {
+                        const mw = __dcMW();
+                        const W = (mw && mw.innerWidth) || 1280;
+                        const H = (mw && mw.innerHeight) || 800;
+                        window.DISCORD_TAB.WIDTH = W;
+                        window.DISCORD_TAB.HEIGHT = H;
+                        bv.SetVisible(true);
+                        bv.SetBounds(0, 0, W, H);
+                        // Stacking order 1 brings the BrowserView above Steam's UI
+                        // layer on Windows so Discord is actually visible.
+                        try { if (bv.SetWindowStackingOrder) bv.SetWindowStackingOrder(1); } catch (_e) { }
+                        bv.SetFocus(true);
+                    } catch (_e) { }
+                };
+                __dcFill();
+                setTimeout(__dcFill, 400);
+                setTimeout(__dcFill, 1200);
+                setTimeout(__dcFill, 3000);
+                setTimeout(__dcFill, 6000);
             }
             else {
                 toaster.toast({

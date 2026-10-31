@@ -42,6 +42,8 @@ class EventHandler:
         self.vc_channel_id = ""
         self.vc_channel_name = ""
         self.vc_guild_name = ""
+        self._vc_sig = None
+        self._vc_poll_task = None
 
         self.webrtc = None
 
@@ -90,7 +92,10 @@ class EventHandler:
 
     async def toggle_mute(self, *args, act=False):
         if act:
-            await self.send_json({"type": 'AUDIO_TOGGLE_SELF_MUTE', "context": 'default', "syncRemote": True})
+            # Use the dedicated toggleSelfMute action creator on the client side
+            # (raw AUDIO_TOGGLE_SELF_MUTE dispatch does not reliably toggle on
+            # Windows). The client processes this before the get_media below.
+            await self.send_json({"type": "$toggle_self_mute"})
         r = await self.api.get_media()
         if not r:
             return
@@ -109,12 +114,79 @@ class EventHandler:
         self.me.is_live = r["live"]
 
     async def disconnect_vc(self):
-        await self.send_json({"type":"VOICE_CHANNEL_SELECT","guildId":None,"channelId":None,"currentVoiceChannelId":self.vc_channel_id,"video":False,"stream":False})
+        ok = await self.send_json({"type": "$disconnect"})
+        if ok:
+            # Optimistically clear local VC state for snappy UI; the poll loop
+            # re-syncs from the stores within a few seconds either way.
+            self.vc_channel_id = ""
+            self.vc_channel_name = ""
+            self.vc_guild_name = ""
+            self._vc_sig = None
+            self.state_changed_event.set()
+        return ok
+
+    async def _refresh_current_vc(self):
+        """Pull the live voice channel + members from the Discord stores and
+        update local state. Only emits a new state when something actually
+        changed, so the QAM panel doesn't flicker or reset every poll."""
+        vc = await self.api.get_current_vc()
+        if vc is None:
+            return
+
+        new_id = vc.get("channel_id") or ""
+        if not new_id:
+            if self.vc_channel_id:
+                self.vc_channel_id = ""
+                self.vc_channel_name = ""
+                self.vc_guild_name = ""
+                self._vc_sig = None
+                self.state_changed_event.set()
+            return
+
+        users = {}
+        for u in vc.get("users", []):
+            uid = u.get("id")
+            if not uid:
+                continue
+            usr = User({"id": uid, "username": u.get("username", ""), "discriminator": None, "avatar": u.get("avatar", "")})
+            usr.is_muted = u.get("is_muted", False)
+            usr.is_deafened = u.get("is_deafened", False)
+            usr.is_live = u.get("is_live", False)
+            users[uid] = usr
+
+        sig = (
+            new_id,
+            vc.get("channel_name", "") or "",
+            vc.get("guild_name", "") or "",
+            tuple(sorted((uid, u.name, u.is_muted, u.is_deafened, u.is_live) for uid, u in users.items())),
+        )
+        if sig == self._vc_sig:
+            return
+
+        self._vc_sig = sig
+        self.vc_channel_id = new_id
+        self.vc_channel_name = vc.get("channel_name", "") or ""
+        self.vc_guild_name = vc.get("guild_name", "") or ""
+        self.voicestates[new_id] = users
+        self.state_changed_event.set()
+
+    async def _poll_vc_loop(self):
+        """Background loop that keeps the active-call panel in sync regardless
+        of whether FluxDispatcher interceptor events reach the backend."""
+        while True:
+            try:
+                if self.logged_in and self.api.ws is not None and not self.api.ws.closed:
+                    await self._refresh_current_vc()
+            except Exception as e:
+                logger.debug(f"VC poll error: {e}")
+            await sleep(3)
 
     async def main(self, ws):
         logger.info("Received WS Connection. Starting event processing loop")
         self.ws = ws
         self.api.ws = ws
+        if self._vc_poll_task is None or self._vc_poll_task.done():
+            self._vc_poll_task = get_event_loop().create_task(self._poll_vc_loop())
         async for msg in self.ws:
             if msg.type == WSMsgType.TEXT:
                 self._process_event(loads(msg.data))
@@ -149,9 +221,17 @@ class EventHandler:
         self.me = User(data["user"])
 
         s = await self.api.get_media()
-        self.me.is_muted = s["mute"]
-        self.me.is_deafened = s["deaf"]
-        self.me.is_live = s["live"]
+        if s:
+            self.me.is_muted = s["mute"]
+            self.me.is_deafened = s["deaf"]
+            self.me.is_live = s["live"]
+
+        # If we logged in while already sitting in a voice channel, surface it
+        # immediately rather than waiting for the next channel change.
+        try:
+            await self._refresh_current_vc()
+        except Exception as e:
+            logger.debug(f"Initial VC refresh failed: {e}")
 
     async def _logout(self, data):
         self.logged_in = False
