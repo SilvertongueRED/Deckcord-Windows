@@ -1,0 +1,76 @@
+name: release
+run-name: Publish release for current version
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - package.json
+      - .github/workflows/release.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Read version
+        id: ver
+        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Skip if release already exists
+        id: exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "v${{ steps.ver.outputs.version }}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup Node.js
+        if: steps.exists.outputs.exists == 'false'
+        uses: actions/setup-node@v4
+        with:
+          node-version: latest
+
+      - name: Setup PNPM
+        if: steps.exists.outputs.exists == 'false'
+        uses: pnpm/action-setup@v4
+        with:
+          version: '9.4.0'
+
+      - name: Build frontend
+        if: steps.exists.outputs.exists == 'false'
+        run: |
+          pnpm i
+          pnpm run build
+
+      - name: Package one zip for Steam Deck and Windows
+        if: steps.exists.outputs.exists == 'false'
+        run: |
+          V="${{ steps.ver.outputs.version }}"
+          mkdir -p pkg/Deckcord/dist
+          cp LICENSE plugin.json package.json main.py pkg/Deckcord/
+          cp -r defaults pkg/Deckcord/defaults
+          cp dist/index.js pkg/Deckcord/dist/index.js
+          find pkg -name __pycache__ -type d -prune -exec rm -rf {} +
+          echo "$V" > pkg/Deckcord/VERSION
+          (cd pkg && zip -r "../Deckcord-$V.zip" Deckcord)
+          # Release notes: the matching changelog section from the README
+          awk -v v="### v$V" '$0 ~ "^"v"[[:space:]]*$" {f=1; next} f && /^(### |## )/ {exit} f' README.md > notes.md
+          printf '\nInstall the same zip on Steam Deck or Windows: Decky settings -> Developer -> upload zip.\n' >> notes.md
+
+      - name: Create release
+        if: steps.exists.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          V="${{ steps.ver.outputs.version }}"
+          gh release create "v$V" "Deckcord-$V.zip" --target "${{ github.sha }}" --title "v$V" --notes-file notes.md
