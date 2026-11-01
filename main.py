@@ -145,25 +145,46 @@ class Plugin:
         # other non-Linux host) launching it raises FileNotFoundError, which
         # would crash backend startup and leave the plugin stuck initializing.
         if sys.platform.startswith("linux"):
-            cls.webrtc_server = await create_subprocess_exec(
-                "/usr/bin/python",
-                str(Path(DECKY_PLUGIN_DIR) / "gst_webrtc.py"),
-                env={
-                    "LD_LIBRARY_PATH": str(Path(DECKY_PLUGIN_DIR) / "bin"),
-                    "GI_TYPELIB_PATH": str(Path(DECKY_PLUGIN_DIR) / "bin/girepository-1.0"),
-                    "GST_PLUGIN_PATH": str(Path(DECKY_PLUGIN_DIR) / "bin/gstreamer-1.0"),
-                    "GST_VAAPI_ALL_DRIVERS": "1",
-                    "OPENSSL_CONF": "/etc/ssl/openssl.cnf",
-                    "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus",
-                    "XDG_RUNTIME_DIR": "/run/user/1000",
-                    "XDG_DATA_DIRS": "/home/deck/.local/share/flatpak/exports/share:/var/lib/flatpak/exports/share:/usr/local/share:/usr/share",
-                    "LIBVA_DRIVER_NAME": "radeonsi",
-                },
-                stdout=PIPE,
-                stderr=PIPE,
+            # Decky merges defaults/ into the plugin root on store installs, but
+            # a manually uploaded zip keeps it nested, so look in both places.
+            gst_script = next(
+                (
+                    p
+                    for p in (
+                        Path(DECKY_PLUGIN_DIR) / "gst_webrtc.py",
+                        Path(DECKY_PLUGIN_DIR) / "defaults" / "gst_webrtc.py",
+                    )
+                    if p.is_file()
+                ),
+                None,
             )
-            create_task(stream_watcher(cls.webrtc_server.stdout))
-            create_task(stream_watcher(cls.webrtc_server.stderr, True))
+            try:
+                if gst_script is None:
+                    raise FileNotFoundError("gst_webrtc.py not found in plugin dir")
+                cls.webrtc_server = await create_subprocess_exec(
+                    "/usr/bin/python",
+                    str(gst_script),
+                    env={
+                        "LD_LIBRARY_PATH": str(Path(DECKY_PLUGIN_DIR) / "bin"),
+                        "GI_TYPELIB_PATH": str(Path(DECKY_PLUGIN_DIR) / "bin/girepository-1.0"),
+                        "GST_PLUGIN_PATH": str(Path(DECKY_PLUGIN_DIR) / "bin/gstreamer-1.0"),
+                        "GST_VAAPI_ALL_DRIVERS": "1",
+                        "OPENSSL_CONF": "/etc/ssl/openssl.cnf",
+                        "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus",
+                        "XDG_RUNTIME_DIR": "/run/user/1000",
+                        "XDG_DATA_DIRS": "/home/deck/.local/share/flatpak/exports/share:/var/lib/flatpak/exports/share:/usr/local/share:/usr/share",
+                        "LIBVA_DRIVER_NAME": "radeonsi",
+                    },
+                    stdout=PIPE,
+                    stderr=PIPE,
+                )
+                create_task(stream_watcher(cls.webrtc_server.stdout))
+                create_task(stream_watcher(cls.webrtc_server.stderr, True))
+            except Exception as e:
+                # Never let a missing helper block startup / initialization.
+                import tab_utils.tab as _tab_mod
+                _tab_mod.GST_WEBRTC_AVAILABLE = False
+                logger.error(f"Could not start GStreamer WebRTC helper, using native screenshare: {e}")
         else:
             logger.info(
                 f"Skipping GStreamer WebRTC helper on non-Linux platform ({sys.platform})"

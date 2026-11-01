@@ -57,10 +57,18 @@ export const DiscordTab = () => {
             if (state?.loaded && window.DISCORD_TAB) {
                 const bv = window.DISCORD_TAB.m_browserView;
                 bv.SetVisible(true);
-                // Keep the Discord BrowserView on top. On Windows, bottom-
-                // stacking it (SetWindowStackingOrder(0)) puts it beneath
-                // Steam's opaque main-UI layer, which composites as a solid
-                // black screen. SetFocus brings it to the front instead.
+                const isWindows = /windows/i.test(navigator.userAgent);
+                if (!isWindows) {
+                    // Steam Deck / Linux: place the Discord BrowserView below
+                    // Steam's UI so the status bar and side menus render on top.
+                    try { bv.SetWindowStackingOrder?.(0); } catch (_e) { }
+                    bv.SetFocus(true);
+                    try { bv.NotifyUserActivation?.(); } catch (_e) { }
+                }
+                else {
+                // Windows: keep the Discord BrowserView on top. Bottom-stacking
+                // it (SetWindowStackingOrder(0)) puts it beneath Steam's opaque
+                // main-UI layer, which composites as a solid black screen.
                 bv.SetFocus(true);
                 try { bv.NotifyUserActivation?.(); } catch (_e) { }
 
@@ -90,6 +98,7 @@ export const DiscordTab = () => {
                 setTimeout(__dcFill, 1200);
                 setTimeout(__dcFill, 3000);
                 setTimeout(__dcFill, 6000);
+                }
             }
             else {
                 toaster.toast({

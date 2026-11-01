@@ -1,3 +1,4 @@
+import sys
 from pathlib import Path
 
 from aiohttp import ClientSession  # type: ignore
@@ -34,6 +35,15 @@ async def find_discord_tab() -> Tab:
         "Could not find Discord browser view tab via CDP after 30 attempts. "
         "The frontend may have failed to create it."
     )
+
+
+# Set to False by main.py if the Linux GStreamer helper could not be started.
+GST_WEBRTC_AVAILABLE = True
+
+
+def use_gst_webrtc() -> bool:
+    """True on Steam Deck / Linux when the GStreamer screenshare helper is running."""
+    return sys.platform.startswith("linux") and GST_WEBRTC_AVAILABLE
 
 
 def _ssl_context():
@@ -104,6 +114,7 @@ async def setup_discord_tab(tab: Tab) -> None:
                 "if(typeof P.isConditionalMediationAvailable!=='function'){P.isConditionalMediationAvailable=function(){return Promise.resolve(false);};}"
                 "}}catch(_){}})();"
                 "Object.hasOwn = (obj, prop) => Object.prototype.hasOwnProperty.call(obj, prop);"
+                + f"window.DECKCORD_NATIVE_DISPLAY_MEDIA = {'false' if use_gst_webrtc() else 'true'};"
                 + await fetch_vencord()
                 + Path(__file__).parent.parent.joinpath("deckcord_client.js").read_text(encoding="utf-8")
                 + Path(__file__).parent.parent.joinpath("webrtc_client.js").read_text(encoding="utf-8"),

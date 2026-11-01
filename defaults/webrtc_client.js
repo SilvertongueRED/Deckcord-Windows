@@ -59,5 +59,10 @@
         }
     });
 
-    window.navigator.mediaDevices.getDisplayMedia = getRTCStream;
+    // Only route screenshare through the GStreamer helper (Steam Deck / Linux).
+    // On Windows the backend sets DECKCORD_NATIVE_DISPLAY_MEDIA so Discord's
+    // native getDisplayMedia is left alone.
+    if (window.DECKCORD_NATIVE_DISPLAY_MEDIA !== true) {
+        window.navigator.mediaDevices.getDisplayMedia = getRTCStream;
+    }
 })();

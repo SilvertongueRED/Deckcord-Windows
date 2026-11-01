@@ -17,16 +17,26 @@
 - Push-to-talk support, with physical keybind to rear buttons. (R5 Button)
 - [Vencord](https://vencord.dev/) gets injected automatically before discord is loaded. It's needed to access a lot of the functionality that allows the plugin to do cool stuff, but also gives ya access to tons of other cool stuff.
 - Working screenshare with audio
+- One zip for both platforms: works on Steam Deck (Decky Loader) and Windows (Steam Big Picture). Platform-specific behavior is detected automatically.
 - Windows (Steam Big Picture) support: fullscreen Discord view, Windows-safe startup and Vencord download.
 
 ## How to install  
 1. Enable *Developer Mode* in Decky General settings.
 2. Download the lateste release from https://github.com/SilvertongueRED/Deckcord-Windows/releases 
-3. Go to Developer in Decky settings and upload the downloaded Deckord zip file
+3. Go to Developer in Decky settings and upload the downloaded Deckcord zip file
+
+The same zip is used on Steam Deck and on Windows - no separate download needed.
+
+Note: Go Live uses a GStreamer helper on Steam Deck (Linux only). On Windows, Discord's native screenshare is used instead.
 
 ### Deckcord is provided with no gurantee as for its functionality, and I offer no "official" support for it. You can ask in the relevant thread on the [Decky Discord](https://discord.com/invite/U88fbeHyzt) and I will try to help if it's something simple. If it breaks, I will try to fix it, but that's it.
 
 ## Changelog
+### v1.0.13
+- One zip now works on both Steam Deck and Windows: the Discord view keeps Steam's status bar and menus on top on the Deck, and fills the window on Windows.
+- Go Live: the GStreamer screenshare helper is only used on Steam Deck/Linux; on Windows (or if the helper can't start) Discord's native screenshare is used. A missing helper can no longer block startup.
+- The GStreamer helper is now found whether or not Decky merged `defaults/` into the plugin folder.
+
 ### v1.0.12
 - The call section (call name, Hang up button, members) now only shows while you are actually in a call.
 
